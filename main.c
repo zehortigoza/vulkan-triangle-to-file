@@ -11,6 +11,8 @@
 #define IMAGE_WIDTH 256
 #define IMAGE_HEIGHT 256
 
+#define DO_COPY 1
+
 // Simple error checking macro
 #define VK_CHECK(x)                                                              \
     do {                                                                         \
@@ -280,7 +282,9 @@ int main() {
     printf("Framebuffer created.\n");
 
     // 8. Graphics Pipeline Creation
+    printf("Will call createShaderModule(device, triangle.vert.spv)\n");
     VkShaderModule vertShaderModule = createShaderModule(device, "triangle.vert.spv");
+    printf("Will call createShaderModule(device, triangle.frag.spv)\n");
     VkShaderModule fragShaderModule = createShaderModule(device, "triangle.frag.spv");
 
     VkPipelineShaderStageCreateInfo vertShaderStageInfo = {};
@@ -442,7 +446,7 @@ int main() {
                          0, NULL,
                          1, &imageLayoutBarrier);
 
-    VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 1.0f}; // black color
+    VkClearValue clearColor = {1.0f, 1.0f, 1.0f, 1.0f}; // black color
     VkRenderPassBeginInfo renderPassBeginInfo = {};
     renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassBeginInfo.renderPass = renderPass;
@@ -454,15 +458,20 @@ int main() {
     renderPassBeginInfo.clearValueCount = 1;
     renderPassBeginInfo.pClearValues = &clearColor;
 
+    printf("Before vkCmdBeginRenderPass()\n");
     vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+    printf("After vkCmdBeginRenderPass()\n");
 
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
+    printf("Before vkCmdDraw()\n");
     // Draw a single triangle (3 vertices)
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    printf("After vkCmdDraw()\n");
 
     vkCmdEndRenderPass(commandBuffer);
 
+#if DO_COPY
     // Image layout transition for offscreenImage from COLOR_ATTACHMENT_OPTIMAL to TRANSFER_SRC_OPTIMAL
     imageLayoutBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     imageLayoutBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -517,12 +526,13 @@ int main() {
     region.imageExtent.height = IMAGE_HEIGHT;
     region.imageExtent.depth = 1;
 
+    printf("vkCmdCopyImageToBuffer()\n");
     vkCmdCopyImageToBuffer(commandBuffer,
                            offscreenImage,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            stagingBuffer,
                            1, &region);
-
+#endif
     VK_CHECK(vkEndCommandBuffer(commandBuffer));
     printf("Command Buffer recording ended.\n");
 
@@ -536,6 +546,7 @@ int main() {
     VK_CHECK(vkQueueWaitIdle(graphicsQueue));
     printf("Command Buffer submitted and queue idle.\n");
 
+#if DO_COPY
     // 12. Readback and Save to PPM
     void* data;
     VK_CHECK(vkMapMemory(device, stagingBufferMemory, 0, bufferInfo.size, 0, &data));
@@ -558,13 +569,16 @@ int main() {
     printf("Rendered image saved to output.ppm\n");
 
     vkUnmapMemory(device, stagingBufferMemory);
+#endif
 
     // 13. Cleanup
     vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     vkDestroyCommandPool(device, commandPool, NULL);
 
+#if DO_COPY
     vkDestroyBuffer(device, stagingBuffer, NULL);
     vkFreeMemory(device, stagingBufferMemory, NULL);
+#endif
 
     vkDestroyFramebuffer(device, framebuffer, NULL);
     vkDestroyRenderPass(device, renderPass, NULL);
