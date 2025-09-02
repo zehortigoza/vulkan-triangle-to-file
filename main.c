@@ -11,7 +11,7 @@
 #define IMAGE_WIDTH 256
 #define IMAGE_HEIGHT 256
 
-#define DO_COPY 1
+#define DO_COPY 0
 
 // Simple error checking macro
 #define VK_CHECK(x)                                                              \
@@ -128,7 +128,7 @@ int main() {
     vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices);
 
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    uint32_t graphicsQueueFamilyIndex = -1;
+    uint32_t queueFamilyIndex = -1;
 
     for (uint32_t i = 0; i < deviceCount; i++) {
         VkQueueFamilyProperties queueFamilyProperties[16]; // Max 16 queue families
@@ -137,9 +137,11 @@ int main() {
         vkGetPhysicalDeviceQueueFamilyProperties(physicalDevices[i], &queueFamilyCount, queueFamilyProperties);
 
         for (uint32_t j = 0; j < queueFamilyCount; j++) {
-            if (queueFamilyProperties[j].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            // Find a queue that supports both graphics and compute
+            if ((queueFamilyProperties[j].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+                (queueFamilyProperties[j].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
                 physicalDevice = physicalDevices[i];
-                graphicsQueueFamilyIndex = j;
+                queueFamilyIndex = j;
                 break;
             }
         }
@@ -150,7 +152,7 @@ int main() {
     free(physicalDevices);
 
     if (physicalDevice == VK_NULL_HANDLE) {
-        fprintf(stderr, "Failed to find a suitable physical device with graphics queue!\n");
+        fprintf(stderr, "Failed to find a suitable physical device with graphics & compute queue!\n");
         return -1;
     }
     printf("Physical Device selected.\n");
@@ -158,7 +160,7 @@ int main() {
     // 3. Logical Device Creation
     VkDeviceQueueCreateInfo queueCreateInfo = {};
     queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    queueCreateInfo.queueFamilyIndex = graphicsQueueFamilyIndex;
+    queueCreateInfo.queueFamilyIndex = queueFamilyIndex;
     queueCreateInfo.queueCount = 1;
     float queuePriority = 1.0f;
     queueCreateInfo.pQueuePriorities = &queuePriority;
@@ -173,9 +175,9 @@ int main() {
     VK_CHECK(vkCreateDevice(physicalDevice, &deviceCreateInfo, NULL, &device));
     printf("Logical Device created successfully.\n");
 
-    VkQueue graphicsQueue;
-    vkGetDeviceQueue(device, graphicsQueueFamilyIndex, 0, &graphicsQueue);
-    printf("Graphics Queue obtained.\n");
+    VkQueue queue;
+    vkGetDeviceQueue(device, queueFamilyIndex, 0, &queue);
+    printf("Graphics & Compute Queue obtained.\n");
 
     // 4. Offscreen Image Creation
     VkImageCreateInfo imageInfo = {};
@@ -189,7 +191,7 @@ int main() {
     imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM; // 8 bits per channel, RGBA
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
 
@@ -235,7 +237,7 @@ int main() {
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // Optimized for color attachment
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     VkAttachmentReference colorAttachmentRef = {};
     colorAttachmentRef.attachment = 0;
@@ -246,13 +248,15 @@ int main() {
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
 
+    // Subpass dependency to transition image layout
     VkSubpassDependency dependency = {};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.srcAccessMask = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependency.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependency.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
     VkRenderPassCreateInfo renderPassInfo = {};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -354,22 +358,15 @@ int main() {
     VkPipelineColorBlendStateCreateInfo colorBlending = {};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.logicOp = VK_LOGIC_OP_COPY;
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
-    colorBlending.blendConstants[0] = 0.0f;
-    colorBlending.blendConstants[1] = 0.0f;
-    colorBlending.blendConstants[2] = 0.0f;
-    colorBlending.blendConstants[3] = 0.0f;
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 0;
-    pipelineLayoutInfo.pushConstantRangeCount = 0;
 
-    VkPipelineLayout pipelineLayout;
-    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, NULL, &pipelineLayout));
-    printf("Pipeline Layout created.\n");
+    VkPipelineLayout graphicsPipelineLayout;
+    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, NULL, &graphicsPipelineLayout));
+    printf("Graphics Pipeline Layout created.\n");
 
     VkGraphicsPipelineCreateInfo pipelineInfo = {};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -381,11 +378,9 @@ int main() {
     pipelineInfo.pRasterizationState = &rasterizer;
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = NULL;
-    pipelineInfo.layout = pipelineLayout;
+    pipelineInfo.layout = graphicsPipelineLayout;
     pipelineInfo.renderPass = renderPass;
     pipelineInfo.subpass = 0;
-    pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
     VkPipeline graphicsPipeline;
     VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &graphicsPipeline));
@@ -394,14 +389,145 @@ int main() {
     vkDestroyShaderModule(device, fragShaderModule, NULL);
     vkDestroyShaderModule(device, vertShaderModule, NULL);
 
+
+    // START: >>>>>>>>>> NEW COMPUTE SETUP SECTION <<<<<<<<<<
+
+    // 8a. Create Compute Result Buffer
+    VkBufferCreateInfo computeBufferInfo = {};
+    computeBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    computeBufferInfo.size = sizeof(uint32_t) * 3;
+    computeBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    computeBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer computeResultBuffer;
+    VK_CHECK(vkCreateBuffer(device, &computeBufferInfo, NULL, &computeResultBuffer));
+
+    VkMemoryRequirements computeMemReqs;
+    vkGetBufferMemoryRequirements(device, computeResultBuffer, &computeMemReqs);
+
+    VkMemoryAllocateInfo computeAllocInfo = {};
+    computeAllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    computeAllocInfo.allocationSize = computeMemReqs.size;
+    computeAllocInfo.memoryTypeIndex = findMemoryType(physicalDevice, computeMemReqs.memoryTypeBits,
+                                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    VkDeviceMemory computeResultBufferMemory;
+    VK_CHECK(vkAllocateMemory(device, &computeAllocInfo, NULL, &computeResultBufferMemory));
+    vkBindBufferMemory(device, computeResultBuffer, computeResultBufferMemory, 0);
+    printf("Compute result buffer created.\n");
+
+    // 8b. Create Compute Descriptor Set Layout
+    VkDescriptorSetLayoutBinding bindings[2] = {};
+    // Input image
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    // Output buffer
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutCreateInfo setLayoutInfo = {};
+    setLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    setLayoutInfo.bindingCount = 2;
+    setLayoutInfo.pBindings = bindings;
+
+    VkDescriptorSetLayout computeSetLayout;
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &setLayoutInfo, NULL, &computeSetLayout));
+
+    // 8c. Create Compute Descriptor Pool and Set
+    VkDescriptorPoolSize poolSizes[2] = {};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[0].descriptorCount = 1;
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSizes[1].descriptorCount = 1;
+
+    VkDescriptorPoolCreateInfo poolInfo = {};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 2;
+    poolInfo.pPoolSizes = poolSizes;
+    poolInfo.maxSets = 1;
+
+    VkDescriptorPool computeDescriptorPool;
+    VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, NULL, &computeDescriptorPool));
+
+    VkDescriptorSetAllocateInfo setAllocInfo = {};
+    setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    setAllocInfo.descriptorPool = computeDescriptorPool;
+    setAllocInfo.descriptorSetCount = 1;
+    setAllocInfo.pSetLayouts = &computeSetLayout;
+
+    VkDescriptorSet computeDescriptorSet;
+    VK_CHECK(vkAllocateDescriptorSets(device, &setAllocInfo, &computeDescriptorSet));
+
+    // 8d. Update Descriptor Set
+    VkDescriptorImageInfo descImageInfo = {};
+    descImageInfo.imageView = offscreenImageView;
+    descImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkDescriptorBufferInfo descBufferInfo = {};
+    descBufferInfo.buffer = computeResultBuffer;
+    descBufferInfo.offset = 0;
+    descBufferInfo.range = VK_WHOLE_SIZE;
+
+    VkWriteDescriptorSet writeSets[2] = {};
+    writeSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeSets[0].dstSet = computeDescriptorSet;
+    writeSets[0].dstBinding = 0;
+    writeSets[0].descriptorCount = 1;
+    writeSets[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writeSets[0].pImageInfo = &descImageInfo;
+
+    writeSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeSets[1].dstSet = computeDescriptorSet;
+    writeSets[1].dstBinding = 1;
+    writeSets[1].descriptorCount = 1;
+    writeSets[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writeSets[1].pBufferInfo = &descBufferInfo;
+
+    vkUpdateDescriptorSets(device, 2, writeSets, 0, NULL);
+    printf("Compute descriptor set created and updated.\n");
+
+    // 8e. Create Compute Pipeline
+    VkPipelineLayoutCreateInfo computePipelineLayoutInfo = {};
+    computePipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    computePipelineLayoutInfo.setLayoutCount = 1;
+    computePipelineLayoutInfo.pSetLayouts = &computeSetLayout;
+
+    VkPipelineLayout computePipelineLayout;
+    VK_CHECK(vkCreatePipelineLayout(device, &computePipelineLayoutInfo, NULL, &computePipelineLayout));
+
+    VkShaderModule computeShaderModule = createShaderModule(device, "check.comp.spv");
+
+    VkPipelineShaderStageCreateInfo computeShaderStageInfo = {};
+    computeShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    computeShaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    computeShaderStageInfo.module = computeShaderModule;
+    computeShaderStageInfo.pName = "main";
+
+    VkComputePipelineCreateInfo computePipelineInfo = {};
+    computePipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    computePipelineInfo.stage = computeShaderStageInfo;
+    computePipelineInfo.layout = computePipelineLayout;
+
+    VkPipeline computePipeline;
+    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &computePipelineInfo, NULL, &computePipeline));
+    printf("Compute pipeline created.\n");
+
+    vkDestroyShaderModule(device, computeShaderModule, NULL);
+
+    // END: >>>>>>>>>> NEW COMPUTE SETUP SECTION <<<<<<<<<<
+
     // 9. Command Pool and Command Buffer Creation
-    VkCommandPoolCreateInfo poolInfo = {};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    poolInfo.queueFamilyIndex = graphicsQueueFamilyIndex;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    VkCommandPoolCreateInfo cmdPoolInfo = {};
+    cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    cmdPoolInfo.queueFamilyIndex = queueFamilyIndex;
+    cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     VkCommandPool commandPool;
-    VK_CHECK(vkCreateCommandPool(device, &poolInfo, NULL, &commandPool));
+    VK_CHECK(vkCreateCommandPool(device, &cmdPoolInfo, NULL, &commandPool));
     printf("Command Pool created.\n");
 
     VkCommandBufferAllocateInfo allocCmdBufferInfo = {};
@@ -422,69 +548,93 @@ int main() {
     VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
     printf("Command Buffer recording started.\n");
 
-    // Image layout transition for offscreenImage from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL
-    VkImageMemoryBarrier imageLayoutBarrier = {};
-    imageLayoutBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    imageLayoutBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageLayoutBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    imageLayoutBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    imageLayoutBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    imageLayoutBarrier.image = offscreenImage;
-    imageLayoutBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    imageLayoutBarrier.subresourceRange.baseMipLevel = 0;
-    imageLayoutBarrier.subresourceRange.levelCount = 1;
-    imageLayoutBarrier.subresourceRange.baseArrayLayer = 0;
-    imageLayoutBarrier.subresourceRange.layerCount = 1;
-    imageLayoutBarrier.srcAccessMask = 0;
-    imageLayoutBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-    vkCmdPipelineBarrier(commandBuffer,
-                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                         0,
-                         0, NULL,
-                         0, NULL,
-                         1, &imageLayoutBarrier);
-
-    VkClearValue clearColor = {1.0f, 1.0f, 1.0f, 1.0f}; // black color
+    // ---- Graphics Pass ----
+    VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 1.0f}; // black color
     VkRenderPassBeginInfo renderPassBeginInfo = {};
     renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassBeginInfo.renderPass = renderPass;
     renderPassBeginInfo.framebuffer = framebuffer;
-    renderPassBeginInfo.renderArea.offset.x = 0;
-    renderPassBeginInfo.renderArea.offset.y = 0;
     renderPassBeginInfo.renderArea.extent.width = IMAGE_WIDTH;
     renderPassBeginInfo.renderArea.extent.height = IMAGE_HEIGHT;
     renderPassBeginInfo.clearValueCount = 1;
     renderPassBeginInfo.pClearValues = &clearColor;
 
-    printf("Before vkCmdBeginRenderPass()\n");
     vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-    printf("After vkCmdBeginRenderPass()\n");
-
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-    printf("Before vkCmdDraw()\n");
-    // Draw a single triangle (3 vertices)
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-    printf("After vkCmdDraw()\n");
-
     vkCmdEndRenderPass(commandBuffer);
 
+
+    // START: >>>>>>>>>> NEW COMPUTE DISPATCH SECTION <<<<<<<<<<
+
+    printf("Preparing for compute shader dispatch.\n");
+
+    // The render pass automatically transitioned the image to VK_IMAGE_LAYOUT_GENERAL.
+    // We add a barrier to ensure the graphics writes are finished before compute reads start.
+    VkImageMemoryBarrier imageMemoryBarrier = {};
+    imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    imageMemoryBarrier.image = offscreenImage;
+    imageMemoryBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageMemoryBarrier.subresourceRange.levelCount = 1;
+    imageMemoryBarrier.subresourceRange.layerCount = 1;
+    imageMemoryBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL; // From render pass
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL; // Stays general
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, // Wait for graphics to finish
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,          // Before compute starts
+        0,
+        0, NULL,
+        0, NULL,
+        1, &imageMemoryBarrier);
+
+    // ---- Compute Pass ----
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &computeDescriptorSet, 0, NULL);
+
+    // Dispatch the compute shader
+    uint32_t groupCountX = (IMAGE_WIDTH + 15) / 16; // 16 is local_size_x
+    uint32_t groupCountY = (IMAGE_HEIGHT + 15) / 16; // 16 is local_size_y
+    vkCmdDispatch(commandBuffer, groupCountX, groupCountY, 1);
+    printf("Compute shader dispatched.\n");
+
+    // Add a barrier to ensure compute shader writes are visible to the host
+    VkMemoryBarrier memoryBarrier = {};
+    memoryBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    memoryBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+
+    vkCmdPipelineBarrier(
+        commandBuffer,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, // After compute shader
+        VK_PIPELINE_STAGE_HOST_BIT,           // Before host read
+        0,
+        1, &memoryBarrier,
+        0, NULL,
+        0, NULL);
+
+    // END: >>>>>>>>>> NEW COMPUTE DISPATCH SECTION <<<<<<<<<<
+
+
 #if DO_COPY
-    // Image layout transition for offscreenImage from COLOR_ATTACHMENT_OPTIMAL to TRANSFER_SRC_OPTIMAL
-    imageLayoutBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    imageLayoutBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    imageLayoutBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    imageLayoutBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    // Image layout transition for offscreenImage from GENERAL to TRANSFER_SRC_OPTIMAL
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL; // It's now in GENERAL layout
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT; // From compute read
+    imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT; // For copy command
 
     vkCmdPipelineBarrier(commandBuffer,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT,
                          0,
                          0, NULL,
                          0, NULL,
-                         1, &imageLayoutBarrier);
+                         1, &imageMemoryBarrier);
 
     // Create a host-visible buffer to copy image data to
     VkBufferCreateInfo bufferInfo = {};
@@ -512,16 +662,8 @@ int main() {
 
     // Copy image to buffer
     VkBufferImageCopy region = {};
-    region.bufferOffset = 0;
-    region.bufferRowLength = 0;
-    region.bufferImageHeight = 0;
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.mipLevel = 0;
-    region.imageSubresource.baseArrayLayer = 0;
     region.imageSubresource.layerCount = 1;
-    region.imageOffset.x = 0;
-    region.imageOffset.y = 0;
-    region.imageOffset.z = 0;
     region.imageExtent.width = IMAGE_WIDTH;
     region.imageExtent.height = IMAGE_HEIGHT;
     region.imageExtent.depth = 1;
@@ -542,9 +684,24 @@ int main() {
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
-    VK_CHECK(vkQueueWaitIdle(graphicsQueue));
+    VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(queue));
     printf("Command Buffer submitted and queue idle.\n");
+
+    // START: >>>>>>>>>> NEW COMPUTE RESULT READBACK SECTION <<<<<<<<<<
+
+    uint32_t *computeData;
+    VK_CHECK(vkMapMemory(device, computeResultBufferMemory, 0, sizeof(uint32_t) * 3, 0, (void *)&computeData));
+    uint32_t triangleCount = computeData[0];
+    uint32_t backgroundCount = computeData[1];
+    uint32_t totalCount = computeData[2];
+    vkUnmapMemory(device, computeResultBufferMemory);
+
+    printf("----------------------------------------\n");
+    printf("Compute Shader Result: triangleCount: %u backgroundCount: %u totalCount: %u\n", triangleCount, backgroundCount, totalCount);
+    printf("----------------------------------------\n");
+
+    // END: >>>>>>>>>> NEW COMPUTE RESULT READBACK SECTION <<<<<<<<<<
 
 #if DO_COPY
     // 12. Readback and Save to PPM
@@ -580,10 +737,18 @@ int main() {
     vkFreeMemory(device, stagingBufferMemory, NULL);
 #endif
 
+    // NEW: Cleanup compute resources
+    vkDestroyPipeline(device, computePipeline, NULL);
+    vkDestroyPipelineLayout(device, computePipelineLayout, NULL);
+    vkDestroyDescriptorSetLayout(device, computeSetLayout, NULL);
+    vkDestroyDescriptorPool(device, computeDescriptorPool, NULL);
+    vkDestroyBuffer(device, computeResultBuffer, NULL);
+    vkFreeMemory(device, computeResultBufferMemory, NULL);
+
     vkDestroyFramebuffer(device, framebuffer, NULL);
     vkDestroyRenderPass(device, renderPass, NULL);
     vkDestroyPipeline(device, graphicsPipeline, NULL);
-    vkDestroyPipelineLayout(device, pipelineLayout, NULL);
+    vkDestroyPipelineLayout(device, graphicsPipelineLayout, NULL);
     vkDestroyImageView(device, offscreenImageView, NULL);
     vkDestroyImage(device, offscreenImage, NULL);
     vkFreeMemory(device, offscreenImageMemory, NULL);
@@ -594,4 +759,3 @@ int main() {
 
     return 0;
 }
-
