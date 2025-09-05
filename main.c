@@ -11,7 +11,7 @@
 #define IMAGE_WIDTH 256
 #define IMAGE_HEIGHT 256
 
-#define DO_COPY 0
+#define DO_COPY 1
 
 // Simple error checking macro
 #define VK_CHECK(x)                                                              \
