@@ -1,14 +1,12 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
+// Push constant block matching the C struct
+layout(push_constant) uniform PushConstants {
+    vec4 positions[3];
+    vec4 color;
+} push_consts;
+
 void main() {
-    // Hardcoded triangle vertices in clip space
-    // This makes the triangle fill the screen (or the render target)
-    if (gl_VertexIndex == 0) {
-        gl_Position = vec4(0.0, -0.5, 0.0, 1.0);
-    } else if (gl_VertexIndex == 1) {
-        gl_Position = vec4(0.5, 0.5, 0.0, 1.0);
-    } else if (gl_VertexIndex == 2) {
-        gl_Position = vec4(-0.5, 0.5, 0.0, 1.0);
-    }
+    gl_Position = push_consts.positions[gl_VertexIndex];
 }

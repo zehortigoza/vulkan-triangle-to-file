@@ -13,6 +13,12 @@
 
 #define DO_COPY 1
 
+// Add this struct definition inside main()
+typedef struct GraphicsPushConstants {
+    float positions[3][4]; // 3 vec4s for vertex positions
+    float color[4];        // 1 vec4 for the fragment color
+} GraphicsPushConstants;
+
 // Simple error checking macro
 #define VK_CHECK(x)                                                              \
     do {                                                                         \
@@ -361,7 +367,14 @@ int main() {
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
 
+    VkPushConstantRange pushConstantRange = {};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(GraphicsPushConstants);
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 
     VkPipelineLayout graphicsPipelineLayout;
@@ -561,6 +574,35 @@ int main() {
 
     vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+    GraphicsPushConstants push_constants = {};
+    push_constants.positions[0][0] = 0.0f;
+    push_constants.positions[0][1] = -0.5f;
+    push_constants.positions[0][2] = 0.0f;
+    push_constants.positions[0][3] = 1.0f;
+
+    push_constants.positions[1][0] = 0.5f;
+    push_constants.positions[1][1] = 0.5f;
+    push_constants.positions[1][2] = 0.0f;
+    push_constants.positions[1][3] = 1.0f;
+
+    push_constants.positions[2][0] = -0.5f;
+    push_constants.positions[2][1] = 0.5f;
+    push_constants.positions[2][2] = 0.0f;
+    push_constants.positions[2][3] = 1.0f;
+
+    push_constants.color[0] = 0.0f;
+    push_constants.color[1] = 0.0f;
+    push_constants.color[2] = 1.0f;
+    push_constants.color[3] = 1.0f;
+
+    vkCmdPushConstants(commandBuffer,
+                       graphicsPipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0,
+                       sizeof(GraphicsPushConstants),
+                       &push_constants);
+
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(commandBuffer);
 
