@@ -503,11 +503,18 @@ int main() {
     vkUpdateDescriptorSets(device, 2, writeSets, 0, NULL);
     printf("Compute descriptor set created and updated.\n");
 
+    VkPushConstantRange computePushConstantRange = {};
+    computePushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    computePushConstantRange.offset = 0;
+    computePushConstantRange.size = sizeof(GraphicsPushConstants);
+
     // 8e. Create Compute Pipeline
     VkPipelineLayoutCreateInfo computePipelineLayoutInfo = {};
     computePipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     computePipelineLayoutInfo.setLayoutCount = 1;
     computePipelineLayoutInfo.pSetLayouts = &computeSetLayout;
+    computePipelineLayoutInfo.pushConstantRangeCount = 1;
+    computePipelineLayoutInfo.pPushConstantRanges = &computePushConstantRange;
 
     VkPipelineLayout computePipelineLayout;
     VK_CHECK(vkCreatePipelineLayout(device, &computePipelineLayoutInfo, NULL, &computePipelineLayout));
@@ -638,6 +645,13 @@ int main() {
     // ---- Compute Pass ----
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipelineLayout, 0, 1, &computeDescriptorSet, 0, NULL);
+
+    vkCmdPushConstants(commandBuffer,
+                       computePipelineLayout,
+                       VK_SHADER_STAGE_COMPUTE_BIT,
+                       0,
+                       sizeof(GraphicsPushConstants),
+                       &push_constants);
 
     // Dispatch the compute shader
     uint32_t groupCountX = (IMAGE_WIDTH + 15) / 16; // 16 is local_size_x
