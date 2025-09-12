@@ -3,6 +3,11 @@
 
 layout(location = 0) out vec4 outColor;
 
+layout(push_constant) uniform PushConstants {
+    vec4 positions[3];
+    vec4 color;
+} push_consts;
+
 void main() {
-    outColor = vec4(0.0, 0.0, 1.0, 1.0); // Blue color
+    outColor = push_consts.color;
 }
