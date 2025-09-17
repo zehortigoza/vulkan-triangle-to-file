@@ -1,12 +1,14 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-// Push constant block matching the C struct
-layout(push_constant) uniform PushConstants {
-    vec4 positions[3];
-    vec4 color;
-} push_consts;
+// Input vertex attributes from the vertex buffer
+layout(location = 0) in vec4 inPosition;
+layout(location = 1) in vec4 inColor;
+
+// Output to the fragment shader
+layout(location = 0) out vec4 outColor;
 
 void main() {
-    gl_Position = push_consts.positions[gl_VertexIndex];
+    gl_Position = inPosition;
+    outColor = inColor; // Pass color to the fragment shader
 }

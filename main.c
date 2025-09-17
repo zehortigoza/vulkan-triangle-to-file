@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stddef.h>
 
 // Define the dimensions of the output image
 #define IMAGE_WIDTH 256
@@ -13,11 +14,16 @@
 
 #define DO_COPY 1
 
-// Add this struct definition inside main()
-typedef struct GraphicsPushConstants {
-    float positions[3][4]; // 3 vec4s for vertex positions
-    float color[4];        // 1 vec4 for the fragment color
-} GraphicsPushConstants;
+typedef struct Vertex {
+    float pos[4];
+    float color[4];
+} Vertex;
+
+typedef struct PushConstants {
+    float color[4]; // 1 vec4 for the fragment color check in compute
+    uint32_t test;
+} PushConstants;
+
 
 // Simple error checking macro
 #define VK_CHECK(x)                                                              \
@@ -185,6 +191,41 @@ int main() {
     vkGetDeviceQueue(device, queueFamilyIndex, 0, &queue);
     printf("Graphics & Compute Queue obtained.\n");
 
+    const Vertex vertices[3] = {
+        { { 0.0f, -0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },
+        { { 0.5f,  0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },
+        { {-0.5f,  0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } }
+    };
+    VkDeviceSize bufferSize = sizeof(vertices);
+
+    VkBuffer vertexBuffer;
+    VkDeviceMemory vertexBufferMemory;
+
+    VkBufferCreateInfo bufferInfo = {};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = bufferSize;
+    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VK_CHECK(vkCreateBuffer(device, &bufferInfo, NULL, &vertexBuffer));
+
+    VkMemoryRequirements memRequirements;
+    vkGetBufferMemoryRequirements(device, vertexBuffer, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(physicalDevice, memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    VK_CHECK(vkAllocateMemory(device, &allocInfo, NULL, &vertexBufferMemory));
+    vkBindBufferMemory(device, vertexBuffer, vertexBufferMemory, 0);
+
+    void* data;
+    vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &data);
+    memcpy(data, vertices, (size_t) bufferSize);
+    vkUnmapMemory(device, vertexBufferMemory);
+    printf("Vertex buffer created and populated.\n");
+
     // 4. Offscreen Image Creation
     VkImageCreateInfo imageInfo = {};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -205,10 +246,8 @@ int main() {
     VK_CHECK(vkCreateImage(device, &imageInfo, NULL, &offscreenImage));
     printf("Offscreen Image created.\n");
 
-    VkMemoryRequirements memRequirements;
     vkGetImageMemoryRequirements(device, offscreenImage, &memRequirements);
 
-    VkMemoryAllocateInfo allocInfo = {};
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfo.allocationSize = memRequirements.size;
     allocInfo.memoryTypeIndex = findMemoryType(physicalDevice, memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -311,10 +350,29 @@ int main() {
 
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
 
+    VkVertexInputBindingDescription bindingDescription = {};
+    bindingDescription.binding = 0;
+    bindingDescription.stride = sizeof(Vertex);
+    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    VkVertexInputAttributeDescription attributeDescriptions[2] = {};
+    // Position attribute
+    attributeDescriptions[0].binding = 0;
+    attributeDescriptions[0].location = 0;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    attributeDescriptions[0].offset = offsetof(Vertex, pos);
+    // Color attribute
+    attributeDescriptions[1].binding = 0;
+    attributeDescriptions[1].location = 1;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(Vertex, color);
+
     VkPipelineVertexInputStateCreateInfo vertexInputInfo = {};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 0;   // No vertex bindings (hardcoded triangle)
-    vertexInputInfo.vertexAttributeDescriptionCount = 0; // No vertex attributes
+    vertexInputInfo.vertexBindingDescriptionCount = 1;
+    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount = 2;
+    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions;
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly = {};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -367,15 +425,10 @@ int main() {
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
 
-    VkPushConstantRange pushConstantRange = {};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(GraphicsPushConstants);
-
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipelineLayoutInfo.pushConstantRangeCount = 0;
+    pipelineLayoutInfo.pPushConstantRanges = NULL;
 
     VkPipelineLayout graphicsPipelineLayout;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, NULL, &graphicsPipelineLayout));
@@ -408,7 +461,7 @@ int main() {
     // 8a. Create Compute Result Buffer
     VkBufferCreateInfo computeBufferInfo = {};
     computeBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    computeBufferInfo.size = sizeof(uint32_t) * 3;
+    computeBufferInfo.size = sizeof(uint32_t) * 4;
     computeBufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     computeBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -506,7 +559,7 @@ int main() {
     VkPushConstantRange computePushConstantRange = {};
     computePushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     computePushConstantRange.offset = 0;
-    computePushConstantRange.size = sizeof(GraphicsPushConstants);
+    computePushConstantRange.size = sizeof(PushConstants);
 
     // 8e. Create Compute Pipeline
     VkPipelineLayoutCreateInfo computePipelineLayoutInfo = {};
@@ -582,39 +635,20 @@ int main() {
     vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-    GraphicsPushConstants push_constants = {};
-    push_constants.positions[0][0] = 0.0f;
-    push_constants.positions[0][1] = -0.5f;
-    push_constants.positions[0][2] = 0.0f;
-    push_constants.positions[0][3] = 1.0f;
+    // NEW: Bind the vertex buffer
+    VkBuffer vertexBuffers[] = {vertexBuffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-    push_constants.positions[1][0] = 0.5f;
-    push_constants.positions[1][1] = 0.5f;
-    push_constants.positions[1][2] = 0.0f;
-    push_constants.positions[1][3] = 1.0f;
-
-    push_constants.positions[2][0] = -0.5f;
-    push_constants.positions[2][1] = 0.5f;
-    push_constants.positions[2][2] = 0.0f;
-    push_constants.positions[2][3] = 1.0f;
-
-    push_constants.color[0] = 0.0f;
-    push_constants.color[1] = 0.0f;
-    push_constants.color[2] = 1.0f;
-    push_constants.color[3] = 1.0f;
-
-    vkCmdPushConstants(commandBuffer,
-                       graphicsPipelineLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0,
-                       sizeof(GraphicsPushConstants),
-                       &push_constants);
+    PushConstants push_constants = {};
+    push_constants.color[0] = vertices[0].color[0];
+    push_constants.color[1] = vertices[0].color[1];
+    push_constants.color[2] = vertices[0].color[2];
+    push_constants.color[3] = vertices[0].color[3];
+    push_constants.test = 24;
 
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(commandBuffer);
-
-
-    // START: >>>>>>>>>> NEW COMPUTE DISPATCH SECTION <<<<<<<<<<
 
     printf("Preparing for compute shader dispatch.\n");
 
@@ -650,7 +684,7 @@ int main() {
                        computePipelineLayout,
                        VK_SHADER_STAGE_COMPUTE_BIT,
                        0,
-                       sizeof(GraphicsPushConstants),
+                       sizeof(PushConstants),
                        &push_constants);
 
     // Dispatch the compute shader
@@ -674,9 +708,6 @@ int main() {
         0, NULL,
         0, NULL);
 
-    // END: >>>>>>>>>> NEW COMPUTE DISPATCH SECTION <<<<<<<<<<
-
-
 #if DO_COPY
     // Image layout transition for offscreenImage from GENERAL to TRANSFER_SRC_OPTIMAL
     imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL; // It's now in GENERAL layout
@@ -693,7 +724,6 @@ int main() {
                          1, &imageMemoryBarrier);
 
     // Create a host-visible buffer to copy image data to
-    VkBufferCreateInfo bufferInfo = {};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = IMAGE_WIDTH * IMAGE_HEIGHT * 4; // RGBA, 4 bytes per pixel
     bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -744,24 +774,21 @@ int main() {
     VK_CHECK(vkQueueWaitIdle(queue));
     printf("Command Buffer submitted and queue idle.\n");
 
-    // START: >>>>>>>>>> NEW COMPUTE RESULT READBACK SECTION <<<<<<<<<<
-
     uint32_t *computeData;
-    VK_CHECK(vkMapMemory(device, computeResultBufferMemory, 0, sizeof(uint32_t) * 3, 0, (void *)&computeData));
+    VK_CHECK(vkMapMemory(device, computeResultBufferMemory, 0, sizeof(uint32_t) * 4, 0, (void *)&computeData));
     uint32_t triangleCount = computeData[0];
     uint32_t backgroundCount = computeData[1];
     uint32_t totalCount = computeData[2];
+    uint32_t testCount = computeData[3];
     vkUnmapMemory(device, computeResultBufferMemory);
 
     printf("----------------------------------------\n");
-    printf("Compute Shader Result: triangleCount: %u backgroundCount: %u totalCount: %u\n", triangleCount, backgroundCount, totalCount);
+    printf("Compute Shader Result: triangleCount: %u backgroundCount: %u totalCount: %u test: %u\n",
+           triangleCount, backgroundCount, totalCount, testCount);
     printf("----------------------------------------\n");
-
-    // END: >>>>>>>>>> NEW COMPUTE RESULT READBACK SECTION <<<<<<<<<<
 
 #if DO_COPY
     // 12. Readback and Save to PPM
-    void* data;
     VK_CHECK(vkMapMemory(device, stagingBufferMemory, 0, bufferInfo.size, 0, &data));
 
     FILE* fp = fopen("output.ppm", "wb");
@@ -805,6 +832,10 @@ int main() {
     vkDestroyRenderPass(device, renderPass, NULL);
     vkDestroyPipeline(device, graphicsPipeline, NULL);
     vkDestroyPipelineLayout(device, graphicsPipelineLayout, NULL);
+
+    vkDestroyBuffer(device, vertexBuffer, NULL);
+    vkFreeMemory(device, vertexBufferMemory, NULL);
+
     vkDestroyImageView(device, offscreenImageView, NULL);
     vkDestroyImage(device, offscreenImage, NULL);
     vkFreeMemory(device, offscreenImageMemory, NULL);
