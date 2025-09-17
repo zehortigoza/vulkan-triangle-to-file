@@ -20,8 +20,10 @@ typedef struct Vertex {
 } Vertex;
 
 typedef struct PushConstants {
-    float color[4]; // 1 vec4 for the fragment color check in compute
+    float positions[3][4]; // Data for the push constant path
+    float color[4];
     uint32_t test;
+    uint32_t use_buffer; // 0 = use VkBuffer, 1 = use PushConstants
 } PushConstants;
 
 
@@ -425,10 +427,15 @@ int main() {
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
 
+    VkPushConstantRange pushConstantRange = {};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(PushConstants);
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.pushConstantRangeCount = 0;
-    pipelineLayoutInfo.pPushConstantRanges = NULL;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
     VkPipelineLayout graphicsPipelineLayout;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, NULL, &graphicsPipelineLayout));
@@ -635,17 +642,35 @@ int main() {
     vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
-    // NEW: Bind the vertex buffer
     VkBuffer vertexBuffers[] = {vertexBuffer};
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
     PushConstants push_constants = {};
-    push_constants.color[0] = vertices[0].color[0];
-    push_constants.color[1] = vertices[0].color[1];
-    push_constants.color[2] = vertices[0].color[2];
-    push_constants.color[3] = vertices[0].color[3];
+    // Path 1 (use_buffer = 0): Color data for compute shader to check against
+    push_constants.color[0] = vertices[0].color[0]; // r
+    push_constants.color[1] = vertices[0].color[1]; // g
+    push_constants.color[2] = vertices[0].color[2]; // b
+    push_constants.color[3] = vertices[0].color[3]; // a
+
+    // Path 2 (use_buffer = 1): Hardcoded positions for the vertex shader
+    push_constants.positions[0][0] = 0.0f;  push_constants.positions[0][1] = -0.5f; push_constants.positions[0][2] = 0.0f; push_constants.positions[0][3] = 1.0f;
+    push_constants.positions[1][0] = 0.5f;  push_constants.positions[1][1] = 0.5f;  push_constants.positions[1][2] = 0.0f; push_constants.positions[1][3] = 1.0f;
+    push_constants.positions[2][0] = -0.5f; push_constants.positions[2][1] = 0.5f;  push_constants.positions[2][2] = 0.0f; push_constants.positions[2][3] = 1.0f;
+
+    // Common data
     push_constants.test = 24;
+
+    // 0 will use the data from the VkBuffer.
+    // 1 will use the hardcoded data from this PushConstants struct.
+    push_constants.use_buffer = 999;
+
+    vkCmdPushConstants(commandBuffer,
+                       graphicsPipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0,
+                       sizeof(PushConstants),
+                       &push_constants);
 
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(commandBuffer);
