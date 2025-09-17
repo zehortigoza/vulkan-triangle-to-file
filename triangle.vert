@@ -8,22 +8,29 @@ layout(location = 1) in vec4 inColor;
 // Output to the fragment shader
 layout(location = 0) out vec4 outColor;
 
-// Push constant block for conditional rendering
+// Push constant block with separate offsets
 layout(push_constant) uniform PushConstants {
     vec4 positions[3];
     vec4 color;
+    vec4 vertex_offset;
+    vec4 color_offset;
     uint test;
     uint use_buffer;
 } push_consts;
 
 void main() {
+    vec4 base_pos;
+
+    // 1. Select the data source based on the flag
     if (push_consts.use_buffer == 0) {
-        // Use data from the VkBuffer
-        gl_Position = inPosition;
+        base_pos = inPosition;
         outColor = inColor;
     } else {
-        // Use data from the push constants
-        gl_Position = push_consts.positions[gl_VertexIndex];
+        base_pos = push_consts.positions[gl_VertexIndex];
         outColor = push_consts.color;
     }
+
+    vec4 final_pos = base_pos + push_consts.vertex_offset;
+
+    gl_Position = clamp(final_pos, -1.0, 1.0);
 }

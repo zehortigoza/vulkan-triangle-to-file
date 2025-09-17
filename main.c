@@ -20,11 +20,13 @@ typedef struct Vertex {
 } Vertex;
 
 typedef struct PushConstants {
-    float positions[3][4]; // Data for the push constant path
+    float positions[3][4];
     float color[4];
+    float vertex_offset[4]; // Offset for position only
+    float color_offset[4];  // Offset for color only
     uint32_t test;
-    uint32_t use_buffer; // 0 = use VkBuffer, 1 = use PushConstants
-} PushConstants;
+    uint32_t use_buffer;
+} __attribute__((packed)) PushConstants;
 
 
 // Simple error checking macro
@@ -653,7 +655,6 @@ int main() {
     push_constants.color[2] = vertices[0].color[2]; // b
     push_constants.color[3] = vertices[0].color[3]; // a
 
-    // Path 2 (use_buffer = 1): Hardcoded positions for the vertex shader
     push_constants.positions[0][0] = 0.0f;  push_constants.positions[0][1] = -0.5f; push_constants.positions[0][2] = 0.0f; push_constants.positions[0][3] = 1.0f;
     push_constants.positions[1][0] = 0.5f;  push_constants.positions[1][1] = 0.5f;  push_constants.positions[1][2] = 0.0f; push_constants.positions[1][3] = 1.0f;
     push_constants.positions[2][0] = -0.5f; push_constants.positions[2][1] = 0.5f;  push_constants.positions[2][2] = 0.0f; push_constants.positions[2][3] = 1.0f;
@@ -663,7 +664,18 @@ int main() {
 
     // 0 will use the data from the VkBuffer.
     // 1 will use the hardcoded data from this PushConstants struct.
-    push_constants.use_buffer = 999;
+    push_constants.use_buffer = 0;
+
+    // ** SET THE OFFSET VALUES HERE **
+    push_constants.vertex_offset[0] = 0.5f; // x
+    push_constants.vertex_offset[1] = 0.0f; // y
+    push_constants.vertex_offset[2] = 0.0f; // z
+    push_constants.vertex_offset[3] = 0.0f; // w
+
+    push_constants.color_offset[0] = 1.0f; // blue
+    push_constants.color_offset[1] = 0.0f; // green
+    push_constants.color_offset[2] = 0.0f; // red
+    push_constants.color_offset[3] = 0.0f; // alpha
 
     vkCmdPushConstants(commandBuffer,
                        graphicsPipelineLayout,
