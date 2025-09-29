@@ -1,0 +1,42 @@
+// check.comp.glsl
+#version 450
+
+layout (local_size_x = 16, local_size_y = 16) in;
+
+// Binding 0: The offscreen image rendered by the graphics pipeline
+layout (binding = 0, rgba8) uniform readonly image2D inputImage;
+
+// Binding 1: The output buffer for the result
+layout (binding = 1, std430) buffer ResultBuffer {
+    uint triangle;
+    uint backgroud;
+    uint total;
+    uint test;
+} res;
+
+// Push constant block matching the C struct for correct layout
+layout(push_constant) uniform PushConstants {
+    vec4 positions[3];
+    vec4 color;
+    vec4 vertex_offset;
+    vec4 color_offset;
+    uint test;
+    uint use_buffer;
+} push_consts;
+
+void main() {
+    ivec2 texelCoord = ivec2(gl_GlobalInvocationID.xy);
+    vec4 color = imageLoad(inputImage, texelCoord);
+
+    color = color - push_consts.color_offset;
+
+    // Check if the pixel color is very close to the target color from the push constant.
+    if (distance(color.rgb, push_consts.color.rgb) < 0.1) {
+        atomicAdd(res.triangle, 1);
+    } else {
+        atomicAdd(res.backgroud, 1);
+    }
+    atomicAdd(res.total, 1);
+    if (push_consts.test == 24)
+        atomicAdd(res.test, 1);
+}
