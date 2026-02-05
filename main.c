@@ -549,7 +549,7 @@ int main() {
     printf("Command Buffer recording started.\n");
 
     // ---- Graphics Pass ----
-    VkClearValue clearColor = {1.0f, 1.0f, 1.0f, 1.0f}; // white color
+    VkClearValue clearColor = {0.0f, 0.0f, 0.0f, 1.0f}; // black color
     VkRenderPassBeginInfo renderPassBeginInfo = {};
     renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassBeginInfo.renderPass = renderPass;
