@@ -19,18 +19,6 @@ layout(push_constant) uniform PushConstants {
 } push_consts;
 
 void main() {
-    vec4 base_pos;
-
-    // 1. Select the data source based on the flag
-    if (push_consts.use_buffer == 0) {
-        base_pos = inPosition;
-        outColor = inColor;
-    } else {
-        base_pos = push_consts.positions[gl_VertexIndex];
-        outColor = push_consts.color;
-    }
-
-    vec4 final_pos = base_pos + push_consts.vertex_offset;
-
-    gl_Position = clamp(final_pos, -1.0, 1.0);
+    outColor = inColor;
+    gl_Position = inPosition;
 }

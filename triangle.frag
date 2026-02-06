@@ -17,18 +17,11 @@ layout(push_constant) uniform PushConstants {
 } push_consts;
 
 void main() {
-    vec4 base_color;
+    vec4 base_color = inColor;
+    //vec4 color_offset_internal = vec4(1.0f, 0.0f, 1.0f, 0);
 
-    if (push_consts.use_buffer == 0) {
-        // Use interpolated color from the vertex shader (already includes offset)
-        base_color = inColor;
-    } else {
-        // Use the color from the push constant and apply the offset
-        base_color = push_consts.color;
-    }
+    //if (push_consts.test == 24)
+    //    base_color = base_color + color_offset_internal;
 
-    vec4 final_color = base_color + push_consts.color_offset;
-
-    // Clamp the final color to the valid [0.0, 1.0] range and output it
-    outColor = clamp(final_color, 0.0, 1.0);
+    outColor = base_color;
 }

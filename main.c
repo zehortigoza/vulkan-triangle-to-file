@@ -20,12 +20,12 @@ typedef struct Vertex {
 } Vertex;
 
 typedef struct PushConstants {
-    float positions[3][4];
-    float color[4];
-    float vertex_offset[4]; // Offset for position only
-    float color_offset[4];  // Offset for color only
-    uint32_t test;
-    uint32_t use_buffer;
+    float positions[3][4];//12
+    float color[4];//12+4=16
+    float vertex_offset[4]; // Offset for position only//16+4=20
+    float color_offset[4];  // Offset for color only//20+4=24
+    uint32_t test;//24+1=25
+    uint32_t use_buffer;//25+1=26
 } __attribute__((packed)) PushConstants;
 
 
@@ -196,7 +196,7 @@ int main() {
     printf("Graphics & Compute Queue obtained.\n");
 
     const Vertex vertices[3] = {
-        { { 0.0f, -0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },
+        { { 0.0f, -0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },//gree color
         { { 0.5f,  0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },
         { {-0.5f,  0.5f, 0.0f, 1.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } }
     };
@@ -650,6 +650,7 @@ int main() {
 
     PushConstants push_constants = {};
     // Path 1 (use_buffer = 0): Color data for compute shader to check against
+    // green color
     push_constants.color[0] = vertices[0].color[0]; // r
     push_constants.color[1] = vertices[0].color[1]; // g
     push_constants.color[2] = vertices[0].color[2]; // b
@@ -672,6 +673,7 @@ int main() {
     push_constants.vertex_offset[2] = 0.0f; // z
     push_constants.vertex_offset[3] = 0.0f; // w
 
+    //color offset = blue. green + blue = yellow
     push_constants.color_offset[0] = 1.0f; // blue
     push_constants.color_offset[1] = 0.0f; // green
     push_constants.color_offset[2] = 0.0f; // red
