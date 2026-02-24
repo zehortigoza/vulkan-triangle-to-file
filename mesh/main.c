@@ -15,6 +15,11 @@
     } \
 }
 
+// Define our push constant structure matching the shader
+typedef struct {
+    float color[4];
+} PushConstants;
+
 // Utility: Read file contents
 char* read_file(const char* filename, size_t* out_size) {
     FILE* file = fopen(filename, "rb");
@@ -56,14 +61,14 @@ int main() {
     vkEnumeratePhysicalDevices(instance, &deviceCount, NULL);
     VkPhysicalDevice* devices = (VkPhysicalDevice*)malloc(deviceCount * sizeof(VkPhysicalDevice));
     vkEnumeratePhysicalDevices(instance, &deviceCount, devices);
-    VkPhysicalDevice physicalDevice = devices[0]; // Assuming first device supports what we need for simplicity
+    VkPhysicalDevice physicalDevice = devices[0];
     free(devices);
 
     // 3. Create Logical Device with Mesh Shader and Dynamic Rendering features
     float queuePriority = 1.0f;
     VkDeviceQueueCreateInfo queueCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-        .queueFamilyIndex = 0, // Assuming family 0 supports graphics and compute
+        .queueFamilyIndex = 0,
         .queueCount = 1,
         .pQueuePriorities = &queuePriority
     };
@@ -165,8 +170,18 @@ int main() {
     VK_CHECK(vkCreateShaderModule(device, &meshShaderInfo, NULL, &meshModule));
     VK_CHECK(vkCreateShaderModule(device, &fragShaderInfo, NULL, &fragModule));
 
-    // 7. Create Pipeline
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    // 7. Create Pipeline with Push Constants
+    VkPushConstantRange pushConstantRange = {
+        .stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT, // Pushing to the mesh shader
+        .offset = 0,
+        .size = sizeof(PushConstants)
+    };
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pushConstantRange
+    };
     VkPipelineLayout pipelineLayout;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, NULL, &pipelineLayout));
 
@@ -235,7 +250,7 @@ int main() {
         .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = {{{0.1f, 0.1f, 0.1f, 1.0f}}} // Dark grey background
+        .clearValue = {{{0.0f, 0.0f, 0.0f, 1.0f}}}
     };
     VkRenderingInfo renderInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
@@ -253,7 +268,11 @@ int main() {
     VkRect2D scissor = {{0, 0}, {WIDTH, HEIGHT}};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // DRAW CALL: 1 workgroup
+    // Provide the color via Push Constants
+    PushConstants pc = { .color = {1.0f, 0.0f, 0.0f, 1.0f} };
+    vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_MESH_BIT_EXT, 0, sizeof(PushConstants), &pc);
+
+    // DRAW CALL
     vkCmdDrawMeshTasksEXT(cmd, 1, 1, 1);
 
     vkCmdEndRendering(cmd);

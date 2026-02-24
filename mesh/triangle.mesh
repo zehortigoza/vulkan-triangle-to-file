@@ -1,28 +1,29 @@
 #version 460
 #extension GL_EXT_mesh_shader : require
 
-// We only need 1 local invocation to emit our single triangle
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 layout(triangles, max_vertices = 3, max_primitives = 1) out;
 
-// Output colors to the fragment shader
 layout(location = 0) out vec3 v_color[];
+
+// 1. Define the push constant block
+layout(push_constant) uniform PushConstants {
+    vec4 color;
+} pc;
 
 void main() {
     SetMeshOutputsEXT(3, 1);
 
     if (gl_LocalInvocationIndex == 0) {
-        // Define vertices
         gl_MeshVerticesEXT[0].gl_Position = vec4( 0.0, -0.5, 0.0, 1.0);
         gl_MeshVerticesEXT[1].gl_Position = vec4( 0.5,  0.5, 0.0, 1.0);
         gl_MeshVerticesEXT[2].gl_Position = vec4(-0.5,  0.5, 0.0, 1.0);
 
-        // Define a green color for each vertex
-        v_color[0] = vec3(0.0, 1.0, 0.0);
-        v_color[1] = vec3(0.0, 1.0, 0.0);
-        v_color[2] = vec3(0.0, 1.0, 0.0);
+        // 2. Read the color from the push constant
+        v_color[0] = pc.color.rgb;
+        v_color[1] = pc.color.rgb;
+        v_color[2] = pc.color.rgb;
 
-        // Define the triangle indices
         gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0, 1, 2);
     }
 }
