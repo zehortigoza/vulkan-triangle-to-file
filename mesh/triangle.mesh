@@ -6,10 +6,10 @@ layout(triangles, max_vertices = 3, max_primitives = 1) out;
 
 layout(location = 0) out vec3 v_color[];
 
-// 1. Define the push constant block
-layout(push_constant) uniform PushConstants {
+// 1. Define the Uniform Buffer block at Descriptor Set 0, Binding 0
+layout(set = 0, binding = 0) uniform UBO {
     vec4 color;
-} pc;
+} ubo;
 
 void main() {
     SetMeshOutputsEXT(3, 1);
@@ -19,10 +19,10 @@ void main() {
         gl_MeshVerticesEXT[1].gl_Position = vec4( 0.5,  0.5, 0.0, 1.0);
         gl_MeshVerticesEXT[2].gl_Position = vec4(-0.5,  0.5, 0.0, 1.0);
 
-        // 2. Read the color from the push constant
-        v_color[0] = pc.color.rgb;
-        v_color[1] = pc.color.rgb;
-        v_color[2] = pc.color.rgb;
+        // 2. Read the color from the UBO
+        v_color[0] = ubo.color.rgb;
+        v_color[1] = ubo.color.rgb;
+        v_color[2] = ubo.color.rgb;
 
         gl_PrimitiveTriangleIndicesEXT[0] = uvec3(0, 1, 2);
     }

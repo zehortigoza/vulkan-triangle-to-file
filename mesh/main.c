@@ -15,10 +15,9 @@
     } \
 }
 
-// Define our push constant structure matching the shader
 typedef struct {
     float color[4];
-} PushConstants;
+} UniformBufferObject;
 
 // Utility: Read file contents
 char* read_file(const char* filename, size_t* out_size) {
@@ -170,21 +169,91 @@ int main() {
     VK_CHECK(vkCreateShaderModule(device, &meshShaderInfo, NULL, &meshModule));
     VK_CHECK(vkCreateShaderModule(device, &fragShaderInfo, NULL, &fragModule));
 
-    // 7. Create Pipeline with Push Constants
-    VkPushConstantRange pushConstantRange = {
-        .stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT, // Pushing to the mesh shader
-        .offset = 0,
-        .size = sizeof(PushConstants)
+    // 7. Uniform Buffer Setup (New)
+    VkBufferCreateInfo uboBufferInfo = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = sizeof(UniformBufferObject),
+        .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
     };
+    VkBuffer uboBuffer;
+    VK_CHECK(vkCreateBuffer(device, &uboBufferInfo, NULL, &uboBuffer));
 
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
+    vkGetBufferMemoryRequirements(device, uboBuffer, &memRequirements);
+    VkMemoryAllocateInfo uboAllocInfo = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+        .allocationSize = memRequirements.size,
+        .memoryTypeIndex = find_memory_type(physicalDevice, memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+    };
+    VkDeviceMemory uboMemory;
+    VK_CHECK(vkAllocateMemory(device, &uboAllocInfo, NULL, &uboMemory));
+    VK_CHECK(vkBindBufferMemory(device, uboBuffer, uboMemory, 0));
+
+    // Map and write our blue color to the UBO memory
+    void* uboData;
+    vkMapMemory(device, uboMemory, 0, sizeof(UniformBufferObject), 0, &uboData);
+    UniformBufferObject ubo = { .color = {0.0f, 0.0f, 1.0f, 1.0f} };
+    memcpy(uboData, &ubo, sizeof(UniformBufferObject));
+    vkUnmapMemory(device, uboMemory);
+
+    // 8. Descriptor Set Layout & Descriptor Set setup (New)
+    VkDescriptorSetLayoutBinding uboLayoutBinding = {
+        .binding = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .stageFlags = VK_SHADER_STAGE_MESH_BIT_EXT,
+        .pImmutableSamplers = NULL
+    };
+    VkDescriptorSetLayoutCreateInfo layoutInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+        .bindingCount = 1,
+        .pBindings = &uboLayoutBinding
+    };
+    VkDescriptorSetLayout descriptorSetLayout;
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &layoutInfo, NULL, &descriptorSetLayout));
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo = { 
         .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-        .pushConstantRangeCount = 1,
-        .pPushConstantRanges = &pushConstantRange
+        .setLayoutCount = 1,
+        .pSetLayouts = &descriptorSetLayout // Tell pipeline layout about our descriptor
     };
     VkPipelineLayout pipelineLayout;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, NULL, &pipelineLayout));
 
+    // Create Descriptor Pool
+    VkDescriptorPoolSize poolSize = { .type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = 1 };
+    VkDescriptorPoolCreateInfo descPoolInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+        .poolSizeCount = 1,
+        .pPoolSizes = &poolSize,
+        .maxSets = 1
+    };
+    VkDescriptorPool descriptorPool;
+    VK_CHECK(vkCreateDescriptorPool(device, &descPoolInfo, NULL, &descriptorPool));
+
+    // Allocate Descriptor Set
+    VkDescriptorSetAllocateInfo allocDescInfo = {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = descriptorPool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &descriptorSetLayout
+    };
+    VkDescriptorSet descriptorSet;
+    VK_CHECK(vkAllocateDescriptorSets(device, &allocDescInfo, &descriptorSet));
+
+    // Update Descriptor Set to point to our UBO Buffer
+    VkDescriptorBufferInfo descriptorBufferInfo = { .buffer = uboBuffer, .offset = 0, .range = sizeof(UniformBufferObject) };
+    VkWriteDescriptorSet descriptorWrite = {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = descriptorSet,
+        .dstBinding = 0,
+        .dstArrayElement = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .descriptorCount = 1,
+        .pBufferInfo = &descriptorBufferInfo
+    };
+    vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, NULL);
+
+    // 9. Pipeline Setup
     VkPipelineShaderStageCreateInfo shaderStages[] = {
         { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_MESH_BIT_EXT, .module = meshModule, .pName = "main" },
         { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fragModule, .pName = "main" }
@@ -220,7 +289,7 @@ int main() {
     VkPipeline pipeline;
     VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &pipeline));
 
-    // 8. Command Buffer Setup
+    // 10. Command Buffer Record and Submit
     VkCommandPoolCreateInfo poolInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = 0 };
     VkCommandPool commandPool;
     VK_CHECK(vkCreateCommandPool(device, &poolInfo, NULL, &commandPool));
@@ -229,11 +298,9 @@ int main() {
     VkCommandBuffer cmd;
     VK_CHECK(vkAllocateCommandBuffers(device, &allocCmdInfo, &cmd));
 
-    // 9. Record Commands
     VkCommandBufferBeginInfo beginInfo = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo));
 
-    // Transition image to COLOR_ATTACHMENT_OPTIMAL
     VkImageMemoryBarrier barrier = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
         .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -243,14 +310,13 @@ int main() {
     };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0, NULL, 1, &barrier);
 
-    // Begin Rendering
     VkRenderingAttachmentInfo colorAttachment = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
         .imageView = imageView,
         .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
         .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-        .clearValue = {{{0.0f, 0.0f, 0.0f, 1.0f}}}
+        .clearValue = {{{0.1f, 0.1f, 0.1f, 1.0f}}}
     };
     VkRenderingInfo renderInfo = {
         .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
@@ -268,37 +334,30 @@ int main() {
     VkRect2D scissor = {{0, 0}, {WIDTH, HEIGHT}};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Provide the color via Push Constants
-    PushConstants pc = { .color = {1.0f, 0.0f, 0.0f, 1.0f} };
-    vkCmdPushConstants(cmd, pipelineLayout, VK_SHADER_STAGE_MESH_BIT_EXT, 0, sizeof(PushConstants), &pc);
+    // Bind our Descriptor Set (UBO) here
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSet, 0, NULL);
 
-    // DRAW CALL
     vkCmdDrawMeshTasksEXT(cmd, 1, 1, 1);
-
     vkCmdEndRendering(cmd);
 
-    // Transition image to TRANSFER_SRC_OPTIMAL
     barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &barrier);
 
-    // Copy Image to Host-Visible Buffer
     VkBufferImageCopy region = {
         .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
         .imageExtent = {WIDTH, HEIGHT, 1}
     };
     vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &region);
-
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    // 10. Submit and Wait
     VkSubmitInfo submitInfo = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd };
     VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
     VK_CHECK(vkQueueWaitIdle(queue));
 
-    // 11. Read Buffer and Save to File (PPM format)
+    // 11. Read Buffer and Save to File
     void* data;
     vkMapMemory(device, bufferMemory, 0, WIDTH * HEIGHT * 4, 0, &data);
 
@@ -318,7 +377,12 @@ int main() {
 
     vkUnmapMemory(device, bufferMemory);
 
-    // 12. Cleanup
+    // 12. Cleanup (Now including UBO and Descriptors)
+    vkDestroyDescriptorPool(device, descriptorPool, NULL); // This automatically frees the descriptor sets
+    vkDestroyDescriptorSetLayout(device, descriptorSetLayout, NULL);
+    vkDestroyBuffer(device, uboBuffer, NULL);
+    vkFreeMemory(device, uboMemory, NULL);
+
     vkDestroyPipeline(device, pipeline, NULL);
     vkDestroyPipelineLayout(device, pipelineLayout, NULL);
     vkDestroyShaderModule(device, meshModule, NULL);
