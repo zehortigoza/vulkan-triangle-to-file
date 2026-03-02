@@ -17,6 +17,15 @@
         } \
     } while (0)
 
+// Explicitly aligned structure to match the GLSL offsets
+typedef struct {
+    float pos0[2];      // Offset 0
+    float pos1[2];      // Offset 8
+    float pos2[2];      // Offset 16
+    float padding[2];   // Offset 24 - Padding for 16-byte alignment of the vec4
+    float color[4];     // Offset 32
+} PushConstants;
+
 uint32_t findMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
@@ -66,12 +75,12 @@ int main() {
     vkEnumeratePhysicalDevices(instance, &deviceCount, NULL);
     VkPhysicalDevice* physicalDevices = malloc(sizeof(VkPhysicalDevice) * deviceCount);
     vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices);
-    VkPhysicalDevice physicalDevice = physicalDevices[0]; // Just grab the first one
+    VkPhysicalDevice physicalDevice = physicalDevices[0]; 
 
     float queuePriority = 1.0f;
     VkDeviceQueueCreateInfo queueCreateInfo = {
         .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-        .queueFamilyIndex = 0, // Assuming 0 supports graphics for simplicity in headless
+        .queueFamilyIndex = 0, 
         .queueCount = 1,
         .pQueuePriorities = &queuePriority
     };
@@ -105,7 +114,7 @@ int main() {
     VkCommandBuffer cmd;
     VK_CHECK(vkAllocateCommandBuffers(device, &allocInfo, &cmd));
 
-    // 3. Render Target Image (Headless)
+    // 3. Render Target Image
     VkImageCreateInfo imageInfo = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .imageType = VK_IMAGE_TYPE_2D,
@@ -162,7 +171,7 @@ int main() {
     VkFramebuffer framebuffer;
     VK_CHECK(vkCreateFramebuffer(device, &fbInfo, NULL, &framebuffer));
 
-    // 5. Pipeline Setup
+    // 5. Pipeline Setup with Push Constants
     VkShaderModule vertShader = createShaderModule(device, "vert.spv");
     VkShaderModule fragShader = createShaderModule(device, "frag.spv");
     
@@ -183,7 +192,18 @@ int main() {
     VkPipelineColorBlendAttachmentState colorBlendAttachment = {.colorWriteMask = 0xF};
     VkPipelineColorBlendStateCreateInfo colorBlending = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO, .attachmentCount = 1, .pAttachments = &colorBlendAttachment};
 
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    // Define Push Constant Range
+    VkPushConstantRange pushConstantRange = {
+        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        .offset = 0,
+        .size = sizeof(PushConstants)
+    };
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        .pushConstantRangeCount = 1,
+        .pPushConstantRanges = &pushConstantRange
+    };
     VkPipelineLayout pipelineLayout;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, NULL, &pipelineLayout));
 
@@ -198,7 +218,7 @@ int main() {
     VkPipeline pipeline;
     VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &pipeline));
 
-    // 6. Query Pool Setup (Occlusion)
+    // 6. Query Pool Setup
     VkQueryPoolCreateInfo queryPoolInfo = {
         .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
         .queryType = VK_QUERY_TYPE_OCCLUSION,
@@ -208,7 +228,7 @@ int main() {
     VK_CHECK(vkCreateQueryPool(device, &queryPoolInfo, NULL, &queryPool));
 
     // 7. Buffers for Query Results and Image Copy
-    VkDeviceSize queryBufferSize = 2 * sizeof(uint64_t); // 64-bit result + 64-bit availability
+    VkDeviceSize queryBufferSize = 2 * sizeof(uint64_t); 
     VkBufferCreateInfo queryBufferInfo = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = queryBufferSize, .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
     VkBuffer queryBuffer;
     VK_CHECK(vkCreateBuffer(device, &queryBufferInfo, NULL, &queryBuffer));
@@ -219,7 +239,6 @@ int main() {
     VK_CHECK(vkAllocateMemory(device, &memAllocInfo, NULL, &queryBufferMemory));
     vkBindBufferMemory(device, queryBuffer, queryBufferMemory, 0);
 
-    // Pre-fill query buffer with garbage to easily detect driver write failures
     void* mappedQueryBuf;
     vkMapMemory(device, queryBufferMemory, 0, queryBufferSize, 0, &mappedQueryBuf);
     memset(mappedQueryBuf, 0xAA, queryBufferSize); 
@@ -252,13 +271,31 @@ int main() {
     vkCmdBeginRenderPass(cmd, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
+    // Supply our vertices and colors via push constants
+    PushConstants pcData = {
+        .pos0 = { 0.0f, -0.5f },
+        .pos1 = { 0.5f,  0.5f },
+        .pos2 = {-0.5f,  0.5f },
+        .padding = { 0.0f, 0.0f },
+        .color = { 1.0f, 0.0f, 0.0f, 1.0f } // Red
+    };
+    
+    vkCmdPushConstants(
+        cmd, 
+        pipelineLayout, 
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 
+        0, 
+        sizeof(PushConstants), 
+        &pcData
+    );
+
     vkCmdBeginQuery(cmd, queryPool, 0, 0);
-    vkCmdDraw(cmd, 3, 1, 0, 0); // Draw triangle
+    vkCmdDraw(cmd, 3, 1, 0, 0);
     vkCmdEndQuery(cmd, queryPool, 0);
 
     vkCmdEndRenderPass(cmd);
 
-    // Copy Image to Buffer
+    // Copy Image to Buffer (Fixed layout order)
     VkBufferImageCopy region = {
         .bufferOffset = 0, .bufferRowLength = 0, .bufferImageHeight = 0,
         .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
@@ -266,14 +303,14 @@ int main() {
     };
     vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, imageBuffer, 1, &region);
 
-    // TEST TARGET: Copy Query Results to Buffer
+    // Copy Query Results to Buffer
     vkCmdCopyQueryPoolResults(
         cmd, 
         queryPool, 
         0, 1, 
         queryBuffer, 
         0, 
-        2 * sizeof(uint64_t), // Stride
+        2 * sizeof(uint64_t), 
         VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT
     );
 
@@ -326,7 +363,7 @@ int main() {
     fprintf(ppmFile, "P6\n%d %d\n255\n", WIDTH, HEIGHT);
     uint8_t* pixels = (uint8_t*)mappedImageBuf;
     for (int i = 0; i < WIDTH * HEIGHT * 4; i += 4) {
-        fwrite(&pixels[i], 1, 3, ppmFile); // Write RGB, skip A
+        fwrite(&pixels[i], 1, 3, ppmFile); 
     }
     fclose(ppmFile);
     vkUnmapMemory(device, imageBufferMemory);
